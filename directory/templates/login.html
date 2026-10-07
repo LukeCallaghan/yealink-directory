@@ -1,0 +1,5 @@
+{% extends 'base.html' %}{% block title %}Sign in{% endblock %}
+{% block content %}<section class="login card"><div class="eyebrow">LOCAL DIRECTORY</div><h1>A simpler way to<br>keep everyone connected.</h1><p class="muted">Enter your shared password to manage the phone directory.</p>
+{% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus><button class="primary wide">Sign in</button></form>
+<p class="small muted">Your contacts stay on this computer.</p></section>{% endblock %}

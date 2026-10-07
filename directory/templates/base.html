@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Directory{% endblock %} · Yealink Directory</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+<script src="{{ url_for('static', filename='app.js') }}" defer></script></head>
+<body>
+<header class="header"><a class="brand" href="{{ url_for('index') }}"><span class="brand-icon">Y</span><span>Yealink<span class="brand-sub">Directory manager</span></span></a>
+{% if session.get('authenticated') %}<nav aria-label="Main navigation">
+<a class="{{ 'active' if request.endpoint == 'index' }}" href="{{ url_for('index') }}">Directory</a>
+<a class="{{ 'active' if request.endpoint == 'phones' }}" href="{{ url_for('phones') }}">Phones</a>
+<a class="{{ 'active' if request.endpoint == 'settings' }}" href="{{ url_for('settings') }}">Settings</a>
+</nav><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="quiet">Sign out</button></form>{% endif %}</header>
+<main>{% for category,message in get_flashed_messages(with_categories=true) %}<div class="notice {{ category }}" role="status">{{ message }}</div>{% endfor %}
+{% block content %}{% endblock %}</main>
+<footer><span class="dot"></span> Runs on your local network <span>Yealink Directory</span></footer>
+</body></html>

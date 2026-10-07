@@ -1,0 +1,1 @@
+"""Yealink Directory application."""
