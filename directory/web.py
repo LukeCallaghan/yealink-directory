@@ -21,7 +21,7 @@ from flask import (
 from werkzeug.security import check_password_hash
 
 from .phonebook import FIELDS, parse_xml, validate, xml_for
-from .phones import Phone, subnets_from
+from .phones import Phone, PhoneError, subnets_from
 from .store import Store
 
 
@@ -316,7 +316,7 @@ def create_app(folder=None):
                 except Exception as error:
                     flash(
                         str(error)
-                        if isinstance(error, ValueError)
+                        if isinstance(error, (ValueError, PhoneError))
                         else "Enrollment failed. Check credentials, connectivity and firmware.",
                         "error",
                     )

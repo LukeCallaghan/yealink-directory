@@ -23,7 +23,14 @@ def validate(row):
 def parse_xml(content):
     if len(content) > 2_000_000:
         raise ValueError("Directory file is too large.")
-    root = fromstring(content)
+    # Older T46S firmware exports two sibling elements without a document root.
+    fragment = re.sub(rb"^\s*<\?xml[^?]*\?>", b"", content).lstrip()
+    if fragment.startswith(b"<root_group"):
+        root = fromstring(b"<vp_contact>" + fragment + b"</vp_contact>")
+        if [child.tag for child in root] != ["root_group", "root_contact"]:
+            raise ValueError("Use a Yealink local directory XML export.")
+    else:
+        root = fromstring(content)
     if root.tag != "vp_contact":
         raise ValueError("Use a Yealink local directory XML export.")
     items = root.findall("./root_contact/contact")

@@ -137,6 +137,8 @@ class Phone:
             PinnedHandler(fingerprint, self.observed),
         )
         self.token = ""
+        self.legacy = None
+        self.legacy_interface = False
         self.timeout = timeout
 
     def request(self, path, body=None, content_type="application/json", anonymous=False):
@@ -152,7 +154,7 @@ class Phone:
         return content
 
     def post(self, path, payload, preauth=False):
-        result = json.loads(self.request(path, json.dumps(payload).encode()))
+        result = self.json_response(path, self.request(path, json.dumps(payload).encode()))
         if result.get("ret") not in ("ok", "true", True):
             if preauth and isinstance(result.get("error"), dict):
                 return result["error"]
@@ -161,16 +163,34 @@ class Phone:
             )
         return result.get("data", {})
 
+    @staticmethod
+    def json_response(path, content):
+        try:
+            result = json.loads(content)
+        except (ValueError, UnicodeError) as error:
+            raise PhoneError(
+                f"Phone returned a non-JSON response at {path}. Check firmware compatibility."
+            ) from error
+        if not isinstance(result, dict):
+            raise PhoneError(f"Phone returned an unsupported response at {path}.")
+        return result
+
     def identify(self):
         page = self.request("/", anonymous=True).decode(errors="replace")
         match = re.search(r"<title>Yealink (T46S|T43U) Phone</title>", page, re.I)
         if not match:
             raise PhoneError("Not a supported Yealink phone.")
+        self.legacy_interface = "/js/pages/page_login.js" in page and "g_rsa_n" in page
         return {"ip": self.ip, "model": match.group(1).upper(), "fingerprint": self.observed[0]}
 
     def login(self, username, password):
         # Check identity on the pinned connection before transmitting credentials.
         self.identify()
+        if self.legacy_interface:
+            from .legacy import LegacyPhone
+
+            self.legacy = LegacyPhone(self)
+            return self.legacy.login(username, password)
         key = self.post(
             "/api/common/info?p=Login",
             {"idlist": ["wui.common.rsaN", "wui.common.rsaE"]},
@@ -178,8 +198,9 @@ class Phone:
         )
         encrypted = rsa_password(password, field(key, "rsaN"), field(key, "rsaE"))
         body = urllib.parse.urlencode({"username": username, "pwd": encrypted}).encode()
-        result = json.loads(
-            self.request("/api/auth/login?p=Login", body, "application/x-www-form-urlencoded")
+        result = self.json_response(
+            "/api/auth/login?p=Login",
+            self.request("/api/auth/login?p=Login", body, "application/x-www-form-urlencoded"),
         )
         if result.get("ret") != "ok":
             raise UnsafePhone("Administrator login failed. Check credentials before retrying.")
@@ -194,11 +215,16 @@ class Phone:
 
     def logout(self):
         try:
-            self.post("/api/auth/logout?p=ContactsLocal", {})
+            if self.legacy:
+                self.legacy.logout()
+            else:
+                self.post("/api/auth/logout?p=ContactsLocal", {})
         except Exception:
             pass
 
     def export(self):
+        if self.legacy:
+            return self.legacy.export()
         body = urllib.parse.urlencode({"csrfmiddlewaretoken": self.token}).encode()
         content = self.request(
             "/api/contacts/file?type=xml", body, "application/x-www-form-urlencoded"
@@ -207,7 +233,11 @@ class Phone:
         return content
 
     def import_xml(self, payload):
-        status = json.loads(self.request("/api/common/info/status/talking"))
+        if self.legacy:
+            return self.legacy.import_xml(payload)
+        status = self.json_response(
+            "/api/common/info/status/talking", self.request("/api/common/info/status/talking")
+        )
         if status.get("ret") != "ok" or status.get("data") is not False:
             raise BusyPhone("Phone is busy; waiting until it is idle.")
         boundary = "----YealinkDirectory" + secrets.token_hex(12)
@@ -216,12 +246,13 @@ class Phone:
             'filename="contact.xml"\r\nContent-Type: application/xml\r\n\r\n'
         ).encode()
         body += payload + f"\r\n--{boundary}--\r\n".encode()
-        result = json.loads(
+        result = self.json_response(
+            "/api/contacts/uploadxml?overwite=true",
             self.request(
                 "/api/contacts/uploadxml?overwite=true",
                 body,
                 f"multipart/form-data; boundary={boundary}",
-            )
+            ),
         )
         if result.get("ret") != "ok":
             raise UnsafePhone(

@@ -120,9 +120,12 @@ then enroll it. No global TLS bypass is used for enrolled devices.
 
 ## Compatibility and limitations
 
-Direct authenticated XML import/export was verified on a RingCentral-connected
-T43U with firmware 108.86.25.16. T46S compatibility is **assumed at the user's
-request** and has not been tested. The integration uses internal web-interface
+Direct authenticated XML import/export was verified on RingCentral-connected
+T43U firmware 108.86.25.16 and T46S firmware 66.86.25.6. Both passed an unchanged
+directory import followed by a byte-identical fresh export. The app selects the
+newer JSON API or older servlet interface from the anonymous login page. Older
+T46S XML exports with separate group and contact roots are also supported.
+Other firmware versions still require a pilot test. The integration uses internal web-interface
 endpoints, not a documented public API contract. Unsupported firmware is
 reported rather than falling back to provisioning or changing phone settings.
 Use a pilot phone before enrolling a fleet. Shared credentials are supported;
