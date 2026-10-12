@@ -71,6 +71,29 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise UnsafePhone("Phone redirected the request. Refusing to forward credentials.")
 
 
+class DiscoveryRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow login-page redirects only for anonymous GETs on the same HTTPS origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        source = urllib.parse.urlsplit(req.full_url)
+        target = urllib.parse.urlsplit(newurl)
+        if (
+            req.get_method() != "GET"
+            or req.data is not None
+            or target.scheme != "https"
+            or target.hostname != source.hostname
+            or (target.port or 443) != (source.port or 443)
+            or target.username is not None
+            or target.password is not None
+        ):
+            raise UnsafePhone("Discovery redirected outside the phone's HTTPS address.")
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None:
+            # Construct fresh headers rather than forwarding any session or auth state.
+            return urllib.request.Request(redirected.full_url)
+        return None
+
+
 def rsa_password(password, modulus, exponent):
     n, e = int(modulus, 16), int(exponent, 16)
     size = (n.bit_length() + 7) // 8
@@ -108,15 +131,21 @@ class Phone:
             PinnedHandler(fingerprint, self.observed),
             urllib.request.HTTPCookieProcessor(self.cookies),
         )
+        self.discovery_opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            DiscoveryRedirect(),
+            PinnedHandler(fingerprint, self.observed),
+        )
         self.token = ""
         self.timeout = timeout
 
-    def request(self, path, body=None, content_type="application/json"):
+    def request(self, path, body=None, content_type="application/json", anonymous=False):
         headers = {"Content-Type": content_type, "Referer": self.base + "/"}
-        if self.token:
+        if self.token and not anonymous:
             headers["X-CSRFToken"] = self.token
         req = urllib.request.Request(self.base + path, body, headers)
-        with self.opener.open(req, timeout=self.timeout) as response:
+        opener = self.discovery_opener if anonymous else self.opener
+        with opener.open(req, timeout=self.timeout) as response:
             content = response.read(2_000_001)
         if len(content) > 2_000_000:
             raise UnsafePhone("Phone response exceeded the size limit.")
@@ -133,7 +162,7 @@ class Phone:
         return result.get("data", {})
 
     def identify(self):
-        page = self.request("/").decode(errors="replace")
+        page = self.request("/", anonymous=True).decode(errors="replace")
         match = re.search(r"<title>Yealink (T46S|T43U) Phone</title>", page, re.I)
         if not match:
             raise PhoneError("Not a supported Yealink phone.")

@@ -109,6 +109,9 @@ headers are trusted by default. Keep the service off the public internet.
 
 Phone HTTPS uses certificate pinning: discovery reads an anonymous page and
 records its SHA-256 certificate fingerprint; enrollment explicitly trusts it.
+Anonymous discovery follows redirects only to the same phone address and HTTPS
+port. It sends no session cookies or authentication tokens. Login and directory
+API requests reject redirects.
 Every subsequent connection checks that fingerprint before sending credentials.
 After DHCP changes, a matching fingerprint finds the phone at its new address,
 and its authenticated MAC address is checked before updates. A certificate

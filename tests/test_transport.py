@@ -7,7 +7,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from directory.phonebook import parse_xml, xml_for
-from directory.phones import NoRedirect, Phone, PinnedConnection, UnsafePhone
+from directory.phones import DiscoveryRedirect, NoRedirect, Phone, PinnedConnection, UnsafePhone
 
 
 def test_pin_rejects_changed_certificate_before_sending_requests(monkeypatch):
@@ -101,6 +101,7 @@ def test_authenticated_api_protocol_and_rsa_encryption():
     phone = Phone("192.168.10.54", "pin")
     phone.observed.append("pin")
     phone.opener = Opener()
+    phone.discovery_opener = phone.opener
     assert phone.login("admin", "test-password")["mac"] == "249ad8a2b726"
     assert parse_xml(phone.export())[0]["name"] == "Alice"
     phone.import_xml(content)
@@ -111,6 +112,70 @@ def test_authenticated_api_protocol_and_rsa_encryption():
 def test_redirects_never_forward_session_or_credentials():
     with pytest.raises(UnsafePhone):
         NoRedirect().redirect_request(None, None, 302, "", {}, "https://example.com")
+
+
+def test_discovery_redirect_accepts_same_origin_without_forwarding_headers():
+    request = urllib.request.Request(
+        "https://192.168.10.54/",
+        headers={"Cookie": "session=secret", "Authorization": "secret", "X-CSRFToken": "secret"},
+    )
+    redirected = DiscoveryRedirect().redirect_request(
+        request, None, 302, "", {}, "https://192.168.10.54:443/servlet?p=login"
+    )
+    assert redirected.full_url == "https://192.168.10.54:443/servlet?p=login"
+    assert redirected.get_method() == "GET"
+    assert redirected.data is None
+    assert redirected.header_items() == []
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "http://192.168.10.54/",
+        "https://192.168.10.55/",
+        "https://example.com/",
+        "https://192.168.10.54:8443/",
+        "https://admin:secret@192.168.10.54/",
+    ],
+)
+def test_discovery_redirect_rejects_other_origins(target):
+    request = urllib.request.Request("https://192.168.10.54/")
+    with pytest.raises(UnsafePhone, match="outside"):
+        DiscoveryRedirect().redirect_request(request, None, 302, "", {}, target)
+
+
+def test_discovery_redirect_rejects_post():
+    request = urllib.request.Request("https://192.168.10.54/", data=b"password=secret")
+    with pytest.raises(UnsafePhone, match="outside"):
+        DiscoveryRedirect().redirect_request(
+            request, None, 302, "", {}, "https://192.168.10.54/login"
+        )
+
+
+def test_identify_uses_anonymous_opener_without_session_token():
+    phone = Phone("192.168.10.54")
+    phone.token = "saved-session-token"
+    phone.observed.append("certificate")
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self, limit):
+            return b"<title>Yealink T46S Phone</title>"
+
+    class Opener:
+        def open(self, request, timeout):
+            assert request.get_method() == "GET"
+            assert request.get_header("X-csrftoken") is None
+            assert request.get_header("Cookie") is None
+            return Response()
+
+    phone.discovery_opener = Opener()
+    assert phone.identify()["model"] == "T46S"
 
 
 def test_pin_accepts_matching_certificate(monkeypatch):
